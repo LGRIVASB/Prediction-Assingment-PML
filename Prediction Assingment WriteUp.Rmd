@@ -1,0 +1,165 @@
+---
+title: "Prediction Assignment Writeup"
+author: "LGRivas"
+date: "15/9/2020"
+output: html_document
+---
+
+# Course Project: Human Activity Recognition
+
+## Overview
+
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement – a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. 
+
+In this project, we will use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants to predict the manner in which they did the exercise. This is the "classe" variable in the training set.
+
+## Global Option
+
+The report includes the code that were used to build the model. 
+
+```{r setup, include = TRUE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Data Loading
+
+The data used for the model comes from the website **Weight Lifting Exercise**. More information is available here [WLE](http://web.archive.org/web/20161224072740/http:/groupware.les.inf.puc-rio.br/har). There are two files, the training dataset and the test dataset.
+
+```{r downloadData}
+if(!file.exists("./Data")){
+    dir.create("./Data")
+    
+    trainingFile <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+    testFile <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+    
+    download.file(trainingFile, destfile = "./Data/pml-training.csv")
+    download.file(testFile, destfile = "./Data/pml-testing.csv")
+}
+```
+
+## Required Libraries
+
+The packages used for the model are **caret** and **tidyverse**(helps with any transformation of the data).
+
+```{r libraries, message = FALSE, warning = FALSE}
+library(caret)
+library(tidyverse)
+```
+
+## Reading, Cleaning and Exploring Data
+
+After reading the **training** dataset and **test** dataset, we proceed to do some basic exploring. 
+
+```{r dataFile}
+trainingData <- read.csv("./Data/pml-training.csv")
+testData <- read.csv("./Data/pml-testing.csv")
+```
+
+```{r dataExploring, comment = ""}
+dim(trainingData)
+dim(testData)
+```
+Both dataset have 160 variables. The training dataset has 19622 observation and the test dataset has 20 observation. Next we are going to apply some cleaning process to the training dataset and doing the same process to the test dataset. 
+
+### Removing Subject Identification Variables
+
+Lets remove the first 7 variables that identify subjects and have no impact on the outcome **classe**.
+
+```{r idVariables}
+idColumns <- c("X", "user_name", "raw_timestamp_part_1", "raw_timestamp_part_2", "cvtd_timestamp", 
+                "new_window", "num_window")
+trainingSet <- select(trainingData, !all_of(idColumns))
+testSet <- select(testData, !all_of(idColumns))
+```
+Now removing the variables that contains at least **95%** of missing values.
+```{r NAVariables}
+NAcolumns <- apply(is.na(trainingSet), 2, mean) > 0.95
+trainingSet <- trainingSet %>% select(!names(NAcolumns[NAcolumns == TRUE]))
+testSet <- testSet %>% select(!names(NAcolumns[NAcolumns == TRUE]))
+```
+
+Then we proceed to remove the variables that are near zero-variance
+```{r NZVVariables}
+nzv <- nearZeroVar(trainingSet, saveMetrics = TRUE)
+trainingSet <- trainingSet[, nzv$nzv == FALSE]
+testSet <- testSet[, nzv$nzv == FALSE]
+```
+Validating dimensions of our final datasets.
+```{r FinalDataset, comment = ""}
+dim(trainingSet)
+dim(testSet)
+```
+
+## Model Building
+We are comparing two algorithms and making a choice between them to predict the **classe** of our test dataset.
+First we are setting our seed for reproducibility and then split the training dataset into a smaller training dataset and validation dataset. We are going to use the resulting datasets to train and test the performance of the models without seeing the original **Test Set**. 
+
+```{r DataPartition}
+set.seed(100591)
+inTrain <- createDataPartition(y = trainingSet$classe, p = 0.8, list = FALSE)
+train_train <- trainingSet[inTrain, ]
+test_train <- trainingSet[-inTrain, ]
+```
+
+To fit the model, we are setting the **trainControl** function to use 5-fold cross validation for the model.
+```{r fitControl}
+fitControl <- trainControl(method = "cv", number = 5, verboseIter = FALSE)
+```
+
+### Random Forest Model
+
+The first model is Random Forest. We are using the **train** function to create the model with the trControl argument that is equal to our tunning fitControl parameter.
+
+```{r ModelRF, comment = ""}
+modRFFit <- train(classe ~ ., method = "rf", data = train_train, trControl = fitControl)
+modRFFit$finalModel
+```
+
+Then we proceed to predict the classe in the validation dataset and apply the confusion Matrix to measure the accuracy of the model.
+
+```{r resultsRf, comment = ""}
+results <- predict(modRFFit, newdata = test_train)
+confusionMatrix(test_train$classe, results)
+```
+
+The accuracy rate of the first model is **0.9939** and therefore the out of sample error is equal to **0.0061**. It's a great performance. Now plotting the model.
+
+```{r plotRF, echo = FALSE}
+plot(modRFFit)
+```
+
+### Generalized Boosted Model
+
+The second is a Generalized Boosted Model. We are using the **train** function to create the model with the trControl argument that is equal to our tunning fitControl parameter.
+
+```{r ModelGBM, comment = ""}
+modBGMFit <- train(classe ~ ., method = "gbm", data = train_train, verbose = FALSE, 
+                   trControl = fitControl)
+modBGMFit$finalModel
+```
+
+Then we proceed to predict the classe in the validation dataset and apply the confusion Matrix to measure the accuracy of the model.
+
+```{r resultsGBM, comment = ""}
+results <- predict(modBGMFit, newdata = test_train)
+confusionMatrix(test_train$classe, results)
+```
+
+The accuracy rate of the first model is **0.9579** and therefore the out of sample error is equal to **0.0421**. The performance of the GB Model is lower than the random forest model. Now plotting the model.
+
+```{r plotGBM, echo = FALSE}
+plot(modBGMFit)
+```
+
+
+### Final Results
+
+The Random Forest model is the best to predict the **classe** of the orignal **Test Set** according to the accuracy rate values of the two models. Thus, the final step is to create the model with all the original **Training Set** and predict the **classe** of the test set. The results output will be used to answer the **Prediction Quiz**.
+
+```{r finalModel, comment = ""}
+finalModRF <- train(classe ~ ., method = "rf", data = trainingSet, 
+                    trControl = fitControl)
+finalModRF$finalModel
+quizPrediction <- predict(finalModRF, newdata = testSet)
+```
+
